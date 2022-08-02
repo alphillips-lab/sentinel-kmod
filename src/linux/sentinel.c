@@ -131,7 +131,96 @@ asmlinkage int hook_openat(const struct pt_regs *regs)
 asmlinkage int hook_execve(const struct pt_regs *regs) 
 {
     //execve hook here
+    char __user *pathname = (char *)regs->di;
+    //char *const __user *env_args = (char *const *)regs->si;
+    char *const __user *env_args = (char *const *)regs->dx;
 
+    /* */
+    const char * shell_indicators[] = {"bash", "sh", "csh", "zsh", "ksh"};
+    //Centos bashrc global config calls id during loading of the shell!
+    const char * bin_indicators[] = {"/id", "/whoami"};
+    const char * sentinel_secret = "SENTINEL=sentinel_shell";
+    size_t sh_indicator_lst_size = sizeof(shell_indicators)/sizeof(shell_indicators[0]);
+    size_t bin_indicator_lst_size = sizeof(bin_indicators)/sizeof(bin_indicators[0]);
+
+    int i;
+    int j;
+    int suffix_len;
+    int src_len;
+
+    if (SENTINEL_SHELL_KILL)
+    {
+        i = 0;
+        while (env_args[i] != NULL)
+        {
+            if(!strcmp(env_args[i], sentinel_secret))
+            {
+                /*printk(KERN_INFO "sentinel: command execution from PID %d, environment secret %s\n",\
+                current->pid, env_args[i]);*/
+                return orig_execve(regs);
+            }
+            i++;
+        }
+        for (i = 0; i < sh_indicator_lst_size; i++)
+        {
+            if (!strcmp(current->parent->comm, shell_indicators[i]))
+            {
+                printk(KERN_INFO "sentinel: attempt to spawn shell without permission:\n[+] Process: %s\n[+] Parent: %s\n[+] Grandparent: %s\n", \
+                pathname, current->parent->comm, current->parent->parent->comm);
+                kill_pid(find_vpid(current->parent->pid), SIGKILL, 1);
+                return -1;
+            }
+        }
+    }
+
+    for (i = 0; i < bin_indicator_lst_size; i++)
+    {
+        suffix_len = strlen(bin_indicators[i]);
+        src_len = strlen(pathname); 
+
+        if (suffix_len <= src_len && !strcmp(pathname + (src_len - suffix_len), \
+        bin_indicators[i]) ) 
+        {
+            /*
+            TODO -- fix this cursed code (probably go recursive with it)
+            */
+
+            struct task_struct *tmp_parent = current->parent;
+            struct task_struct *tmp_current = current;
+            while(tmp_parent)
+            {
+                int parent_is_shell = 0;
+                for (j = 0; j < sh_indicator_lst_size; j++)
+                { // Is the parent of the execve call a shell?
+                    if (!strcmp(shell_indicators[j], tmp_parent->comm))
+                    {
+                        tmp_current = tmp_parent;
+                        tmp_parent = tmp_parent->parent;
+                        parent_is_shell = 1;
+                    }
+                }
+                if (!parent_is_shell)
+                { // Is the grandparent of the execve call a shell?
+                    for (j = 0; j < sh_indicator_lst_size; j++)
+                    {
+                        if (!strcmp(shell_indicators[j], tmp_parent->parent->comm))
+                        {
+                            tmp_current = tmp_parent->parent;
+                            tmp_parent = tmp_parent->parent->parent;
+                            parent_is_shell = 1;
+                        }
+                    }
+                }
+                if (!parent_is_shell)
+                { // If neither is a shell, kill the current tmp_parent
+                    printk(KERN_INFO "sentinel: execve called for path in indicators list: %s\n[+] Killing process: %s\n[+] PID: %d\n", \
+                    pathname, tmp_current->comm, tmp_current->pid);
+                    kill_pid(find_vpid(tmp_current->pid), SIGKILL, 1);
+                    return -1;
+                }
+            }
+        }
+    }
 
     return orig_execve(regs);
 

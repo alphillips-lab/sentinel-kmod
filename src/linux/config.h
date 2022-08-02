@@ -19,4 +19,4 @@
     Defines whether or not commands missing the session variable should be prevented
     Set to 0 to only check for the command blacklist globally
 */
-#define SENTINEL_SHELL_KILL 0
+#define SENTINEL_SHELL_KILL 1
