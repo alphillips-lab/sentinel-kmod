@@ -18,3 +18,17 @@ Installing the module can be done currently by running `insmod sentinel.ko` as a
 The module will NOT be persistent across reboots currently, but it can be removed manually via `rmmod sentinel.ko`
 
 In preparation for the RvB game it will be important to have a way to build the kernel object for the system without access to make on the host. This should probably be done via dockerfiles with the appropriate kernel version and packages required to build the object.
+
+## Usage ##
+
+The existing functionality of Sentinel is blocking IOCTL syscalls for the immutable flag update. This means, if you were to set the immutable flag for a file (via chattr for example) and then enable Sentinel, nobody would be able to update the immutable flag and edit the file without re-hooking the IOCTL syscall.
+
+Example:
+```
+~# chattr +i flag.txt
+~# insmod sentinel.ko
+~# chattr -i flag.txt
+ioctl error
+~# lsattr flag.txt
+----i----------- flag.txt
+```
